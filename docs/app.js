@@ -131,18 +131,60 @@ function renderContest(r) {
 }
 
 async function readFileText(file) {
-  if (file.type !== 'application/pdf' && !/\.pdf$/i.test(file.name)) return file.text();
-  const pdfjs = await import('https://cdn.jsdelivr.net/npm/pdfjs-dist@5.7.284/build/pdf.mjs');
-  pdfjs.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@5.7.284/build/pdf.worker.mjs';
+  if (file.type !== 'application/pdf' && !/\.pdf$/i.test(file.name)) {
+    return file.text();
+  }
+
+  // PDF.js 6.x: browser-side extraction, no upload to our server.
+  // Scripting is explicitly disabled because PDFs can contain active content.
+  const pdfjs = await import('https://cdn.jsdelivr.net/npm/pdfjs-dist@6.3.289/build/pdf.mjs');
+  pdfjs.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@6.3.289/build/pdf.worker.mjs';
   const buffer = await file.arrayBuffer();
-  const pdf = await pdfjs.getDocument({ data: buffer }).promise;
+  const pdf = await pdfjs.getDocument({ data: new Uint8Array(buffer), enableScripting: false }).promise;
   const pages = [];
   for (let i = 1; i <= pdf.numPages; i++) {
     const page = await pdf.getPage(i);
     const content = await page.getTextContent();
     pages.push(content.items.map((item) => item.str || '').join(' '));
   }
-  return pages.join('\n\n');
+  const text = pages.join('\n\n').trim();
+  if (!text) {
+    throw new Error('Não foi encontrado texto selecionável neste PDF. Ele pode ser escaneado como imagem.');
+  }
+  return text;
+}
+
+async function handleFileInput(inputId, textId, countId, statusId, max) {
+  const input = $(inputId);
+  const file = input.files?.[0];
+  if (!file) return;
+  const status = $(statusId);
+  const textarea = $(textId);
+  const count = $(countId);
+  status.textContent = `Lendo “${file.name}”…`;
+  status.className = 'status loading';
+  try {
+    const text = await readFileText(file);
+    if (text.length > max) {
+      textarea.value = text.slice(0, max);
+      count.textContent = `${max.toLocaleString('pt-BR')} / ${max.toLocaleString('pt-BR')}`;
+      status.textContent = `Arquivo lido. O texto foi limitado aos primeiros ${max.toLocaleString('pt-BR')} caracteres.`;
+    } else {
+      textarea.value = text;
+      count.textContent = `${text.length.toLocaleString('pt-BR')} / ${max.toLocaleString('pt-BR')}`;
+      status.textContent = `✅ “${file.name}” carregado. Agora clique em “${inputId === 'contestFile' ? 'Encontrar o que importa' : 'Analisar'}”.`;
+    }
+    status.className = 'status success';
+    textarea.focus();
+  } catch (err) {
+    console.error(err);
+    status.textContent = `❌ Não consegui ler “${file.name}”. ${err?.message || 'Tente outro PDF ou cole o texto do edital.'}`;
+    status.className = 'status error';
+    textarea.focus();
+  } finally {
+    // Allow selecting the same file again and retriggering the handler.
+    input.value = '';
+  }
 }
 
 function saveHistory(type, data) {
@@ -175,7 +217,7 @@ $('saveProfile').addEventListener('click', saveProfile);
 $('clearProfile').addEventListener('click', clearProfile);
 $('serviceText').addEventListener('input', () => { $('serviceCount').textContent = `${$('serviceText').value.length.toLocaleString('pt-BR')} / 30.000`; });
 $('contestText').addEventListener('input', () => { $('contestCount').textContent = `${$('contestText').value.length.toLocaleString('pt-BR')} / 60.000`; });
-$('serviceFile').addEventListener('change', async (e) => { const f=e.target.files?.[0]; if(f){$('serviceText').value=await readFileText(f);$('serviceCount').textContent=`${$('serviceText').value.length.toLocaleString('pt-BR')} / 30.000`;} });
-$('contestFile').addEventListener('change', async (e) => { const f=e.target.files?.[0]; if(f){$('contestText').value=await readFileText(f);$('contestCount').textContent=`${$('contestText').value.length.toLocaleString('pt-BR')} / 60.000`;} });
+$('serviceFile').addEventListener('change', () => handleFileInput('serviceFile', 'serviceText', 'serviceCount', 'serviceStatus', 30000));
+$('contestFile').addEventListener('change', () => handleFileInput('contestFile', 'contestText', 'contestCount', 'contestStatus', 60000));
 document.querySelectorAll('.nav-btn').forEach((btn) => btn.addEventListener('click', () => { document.querySelectorAll('.nav-btn').forEach((x) => x.classList.remove('active')); btn.classList.add('active'); document.querySelectorAll('.tab-panel').forEach((x) => x.classList.remove('active')); $(btn.dataset.tab === 'services' ? 'servicesTab' : btn.dataset.tab === 'contests' ? 'contestsTab' : 'profileTab').classList.add('active'); }));
 loadProfile();

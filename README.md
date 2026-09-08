@@ -6,7 +6,7 @@ Plataforma open-source, estática e gratuita para transformar textos burocrátic
 
 - Funciona sem servidor e sem chave de API.
 - Pode ser publicada diretamente no **GitHub Pages**.
-- Aceita texto colado e arquivos `.txt` / `.md`.
+- Aceita texto colado e arquivos `.txt` / `.md` / `.pdf`.
 - Mantém histórico e perfil no `localStorage` do navegador.
 - Analisa editais com extração local de:
   - cargos e funções;
@@ -63,7 +63,7 @@ Este projeto é um **analisador de apoio**, não uma fonte oficial. Ele não gar
 
 ## Roadmap sugerido
 
-- Importação de PDF com parser no navegador.
+- Importação de PDF com parser no navegador usando PDF.js 6.3.289, sem enviar o arquivo ao servidor; scripts de PDF são desativados durante a leitura.
 - Comparação de versões do edital.
 - Monitoramento de novas publicações via GitHub Actions.
 - Catálogo por órgão/cargo.
