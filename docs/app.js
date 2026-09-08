@@ -1,223 +1,130 @@
+import { pipeline } from 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.8.1/+esm';
+
 const $ = (id) => document.getElementById(id);
-const PROFILE_KEY = 'cidadao-claro-profile-v2';
-const HISTORY_KEY = 'cidadao-claro-history-v2';
+const PROFILE_KEY = 'cidadao-claro-profile-v3';
+const HISTORY_KEY = 'cidadao-claro-history-v3';
+const MODEL_ID = 'Xenova/paraphrase-multilingual-MiniLM-L12-v2';
+let embeddingPipe = null;
+let lastAreaMap = null;
 
-function esc(value) {
-  return String(value ?? '').replace(/[&<>'"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[c]));
-}
+function esc(value) { return String(value ?? '').replace(/[&<>'"]/g, (c) => ({ '&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;' }[c])); }
 function uniq(items) { return [...new Map(items.filter(Boolean).map((v) => [String(v).toLowerCase(), v])).values()]; }
-function normalize(text) { return String(text || '').replace(/\r\n?/g, '\n').replace(/[ \t]+/g, ' ').replace(/\n{3,}/g, '\n\n').trim(); }
-function lines(text) { return normalize(text).split('\n').map((v) => v.trim()).filter(Boolean); }
-function sentences(text) { return normalize(text).split(/(?<=[.!?])\s+|\n+/).map((v) => v.trim()).filter(Boolean); }
-function matches(text, regex) { return [...text.matchAll(regex)].map((m) => m[0].trim()); }
-function hinted(ls, hints) { return uniq(ls.filter((line) => hints.some((hint) => line.toLowerCase().includes(hint)))); }
-function listHtml(items, empty='Não identificado no texto.') {
-  return Array.isArray(items) && items.length ? items.map((x) => `<li>${esc(x)}</li>`).join('') : `<li>${esc(empty)}</li>`;
-}
+function normalize(text) { return String(text || '').replace(/\r\n?/g,'\n').replace(/[ \t]+/g,' ').replace(/\n{3,}/g,'\n\n').trim(); }
+function lines(text) { return normalize(text).split('\n').map(v=>v.trim()).filter(Boolean); }
+function sentences(text) { return normalize(text).split(/(?<=[.!?])\s+|\n+/).map(v=>v.trim()).filter(Boolean); }
+function listHtml(items, empty='Não identificado no texto.') { return items?.length ? items.map(x=>`<li>${esc(x)}</li>`).join('') : `<li>${esc(empty)}</li>`; }
+function nowDate() { return new Date(); }
+function dateKey(d) { return d ? d.toISOString().slice(0,10) : null; }
+function normalizeAccents(s) { return String(s||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase(); }
 
-function profile() {
-  return {
-    area: $('profileArea').value.trim(),
-    education: $('profileEducation').value,
-    experience: $('profileExperience').value,
-    state: $('profileState').value.trim(),
-    modality: $('profileModality').value
-  };
+const AREA_TAXONOMY = [
+  { canonical:'Design de produto', aliases:['designer de produto','product designer','design de produto'], related:['UX designer','UI designer','designer de interação','service designer','UX researcher','designer digital','design estratégico'], signals:['figma','prototip','ux','ui','pesquisa com usuários','discovery','produto digital','design system','usabilidade','jornada do usuário'] },
+  { canonical:'UX / Experiência do usuário', aliases:['ux','ux designer','experiencia do usuario','experiência do usuário'], related:['Product Designer','UI Designer','UX Researcher','Service Designer','Interaction Designer'], signals:['pesquisa','usabilidade','arquitetura da informação','jornada','protótipo','wireframe','teste com usuários'] },
+  { canonical:'Tecnologia / Desenvolvimento', aliases:['desenvolvedor','developer','software engineer','engenheiro de software','programador','ti','tecnologia'], related:['Analista de Sistemas','Engenheiro de Software','Desenvolvedor Web','DevOps','Dados / BI'], signals:['javascript','python','java','sql','api','cloud','backend','frontend','git','sistema'] },
+  { canonical:'Dados / Analytics', aliases:['dados','data analyst','analista de dados','cientista de dados','bi','business intelligence'], related:['Analista de BI','Cientista de Dados','Engenheiro de Dados','Analista de Sistemas','Estatístico'], signals:['sql','python','power bi','tableau','estatística','analytics','banco de dados','dashboard','machine learning'] },
+  { canonical:'Comunicação / Conteúdo', aliases:['jornalista','redator','copywriter','comunicacao','comunicação','conteudo','conteúdo','marketing de conteúdo'], related:['Analista de Comunicação','Assessor de Comunicação','Social Media','Redator','Copywriter'], signals:['texto','redação','comunicação institucional','mídias sociais','conteúdo','campanha','imprensa'] },
+  { canonical:'Marketing', aliases:['marketing','growth','marketing digital','analista de marketing'], related:['Growth Analyst','Analista de Comunicação','Social Media','CRM','Publicidade'], signals:['seo','crm','campanha','performance','mídia paga','analytics','growth','leads'] },
+  { canonical:'Recursos Humanos / Pessoas', aliases:['rh','recursos humanos','people','recrutamento','recruiter'], related:['Analista de RH','Psicologia Organizacional','People Analytics','Administração'], signals:['recrutamento','seleção','treinamento','clima','folha','benefícios','pessoas'] },
+  { canonical:'Administração / Gestão', aliases:['administrador','administração','gestão','gestor','business analyst'], related:['Analista Administrativo','Analista de Processos','Gestor de Projetos','Analista de Planejamento'], signals:['processos','planejamento','gestão','indicadores','orçamento','compras','contratos'] },
+  { canonical:'Direito', aliases:['advogado','direito','juridico','jurídico','procurador'], related:['Analista Jurídico','Assistente Jurídico','Procurador','Consultor Legislativo'], signals:['legislação','contrato','parecer','processo','petição','jurisprudência'] },
+  { canonical:'Educação / Pedagogia', aliases:['professor','pedagogo','pedagogia','educacao','educação','docencia','docência'], related:['Professor','Pedagogo','Orientador Educacional','Analista Educacional'], signals:['ensino','aprendizagem','pedagógico','sala de aula','educação','currículo'] },
+  { canonical:'Engenharia', aliases:['engenheiro','engenharia'], related:['Engenheiro Civil','Engenheiro de Produção','Engenheiro Mecânico','Analista de Engenharia'], signals:['engenharia','projeto técnico','obra','produção','processos','cálculo'] },
+  { canonical:'Finanças / Contabilidade', aliases:['contador','contabilidade','financeiro','financas','finanças','economia','economista'], related:['Analista Financeiro','Contador','Economista','Auditor'], signals:['contábil','financeiro','orçamento','tributário','balanço','auditoria'] },
+];
+
+function getProfile() { return { area:$('profileArea').value.trim(), details:$('profileDetails').value.trim(), education:$('profileEducation').value, experience:$('profileExperience').value, state:$('profileState').value.trim(), modality:$('profileModality').value }; }
+function setProfile(p={}) { $('profileArea').value=p.area||''; $('profileDetails').value=p.details||''; $('profileEducation').value=p.education||''; $('profileExperience').value=p.experience||''; $('profileState').value=p.state||''; $('profileModality').value=p.modality||''; renderProfileSummary(); refreshAreaMap(false); }
+function loadProfile() { try { setProfile(JSON.parse(localStorage.getItem(PROFILE_KEY)||'{}')); } catch { setProfile({}); } }
+function saveProfile() { localStorage.setItem(PROFILE_KEY, JSON.stringify(getProfile())); renderProfileSummary(); renderProfileAIMap(lastAreaMap); $('contestStatus').textContent='Perfil salvo neste navegador.'; $('contestStatus').className='status success'; }
+function clearProfile() { localStorage.removeItem(PROFILE_KEY); setProfile({}); $('areaMap').classList.add('hidden'); }
+function renderProfileSummary() { const p=getProfile(); $('profileSummary').innerHTML=[['Área',p.area||'Não informada'],['Escolaridade',p.education||'Não informada'],['Experiência',p.experience?`${p.experience} ano(s)`:'Não informada'],['UF/região',p.state||'Não informada'],['Modalidade',p.modality||'Ampla concorrência']].map(([a,b])=>`<div class="profile-chip"><small>${esc(a)}</small><b>${esc(b)}</b></div>`).join(''); }
+
+function inferArea(area, details='') {
+  const q=normalizeAccents(`${area} ${details}`);
+  const exact=[];
+  for (const item of AREA_TAXONOMY) {
+    let score=0; const hits=[];
+    for (const a of item.aliases) if (q.includes(normalizeAccents(a))) { score+=45; hits.push(a); }
+    for (const s of item.signals) if (q.includes(normalizeAccents(s))) { score+=8; hits.push(s); }
+    if (score) exact.push({ ...item, score:Math.min(98,score), hits:uniq(hits) });
+  }
+  exact.sort((a,b)=>b.score-a.score);
+  if (!exact.length) return { primary:{canonical:area||'Área não identificada',score:0,related:[],signals:[],hits:[]}, related:[] };
+  const primary=exact[0];
+  const related=[...primary.related];
+  for (const other of exact.slice(1,3)) related.push(other.canonical, ...other.related.slice(0,2));
+  return { primary, related:uniq(related).slice(0,8), matches:exact.slice(0,4) };
 }
-function loadProfile() {
-  try {
-    const p = JSON.parse(localStorage.getItem(PROFILE_KEY) || '{}');
-    $('profileArea').value = p.area || '';
-    $('profileEducation').value = p.education || '';
-    $('profileExperience').value = p.experience || '';
-    $('profileState').value = p.state || '';
-    $('profileModality').value = p.modality || '';
-  } catch { /* storage may be unavailable */ }
-  renderProfileSummary();
+function refreshAreaMap(show=true) {
+  const p=getProfile(); if (!p.area) { $('areaMap').classList.add('hidden'); return; }
+  lastAreaMap=inferArea(p.area,p.details); renderAreaMap(lastAreaMap, show);
 }
-function saveProfile() {
-  localStorage.setItem(PROFILE_KEY, JSON.stringify(profile()));
-  renderProfileSummary();
-  $('contestStatus').textContent = 'Perfil salvo neste navegador.';
+function renderAreaMap(map, show=true) {
+  if (!map?.primary) return;
+  $('areaMap').innerHTML=`<div class="area-map-head"><span class="ai-badge">✦ IA LOCAL</span><b>${esc(map.primary.canonical)}</b></div><div class="chip-row">${map.related.map(x=>`<span>${esc(x)}</span>`).join('')}</div><small>A IA usa seu texto de perfil para ampliar a busca. Ela não substitui a leitura do requisito do cargo.</small>`;
+  $('areaMap').classList.toggle('hidden',!show);
+  renderProfileAIMap(map);
 }
-function clearProfile() {
-  localStorage.removeItem(PROFILE_KEY);
-  for (const id of ['profileArea','profileEducation','profileExperience','profileState','profileModality']) $(id).value = '';
-  renderProfileSummary();
-}
-function renderProfileSummary() {
-  const p = profile();
-  const data = [['Área', p.area || 'Não informada'], ['Escolaridade', p.education || 'Não informada'], ['Experiência', p.experience ? `${p.experience} ano(s)` : 'Não informada'], ['UF/região', p.state || 'Não informada'], ['Modalidade', p.modality || 'Ampla concorrência']];
-  $('profileSummary').innerHTML = data.map(([a,b]) => `<div class="profile-chip"><small>${esc(a)}</small><b>${esc(b)}</b></div>`).join('');
-}
+function renderProfileAIMap(map) { if(!$('profileAIMap')) return; if(!map?.primary) { $('profileAIMap').innerHTML=''; return; } $('profileAIMap').innerHTML=`<div class="ai-section"><div><span class="ai-badge">✦ IA LOCAL</span><h3>Mapa de áreas correlatas</h3><p>Base inicial para o cruzamento com cargos encontrados no edital.</p></div><div class="chip-row large">${map.related.map(x=>`<span>${esc(x)}</span>`).join('')}</div></div>`; }
 
 function serviceAnalyzeLocal(text) {
-  const t = normalize(text), ls = lines(t), ss = sentences(t);
-  return {
-    title: ls[0] || 'Serviço público',
-    overview: ss.slice(0, 3).join(' '),
-    actions: hinted(ls, ['comparecer','preencher','agendar','entregar','apresentar','enviar','protocolar','solicitar','acompanhar','retirar','pagar','assinar','cadastrar','acessar','anexar']),
-    documents: hinted(ls, ['documento','documentos','rg','cpf','comprovante','certidão','certidao','diploma','histórico','historico','laudo','declaração','declaracao']),
-    deadlines: uniq([...matches(t, /\b\d+\s+dias?\s+(?:[uú]teis|corridos)\b/gi), ...matches(t, /\b(?:\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|\d{1,2}\s+de\s+[A-Za-zçãõáéíóú]+\s+de\s+\d{4})\b/gi)]),
-    costs: uniq(matches(t, /R\$\s*\d{1,3}(?:\.\d{3})*(?:,\d{2})?/gi)),
-    contacts: uniq([...matches(t, /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/ig), ...matches(t, /(?:\+55\s*)?(?:\(?\d{2}\)?\s*)?(?:9\s*)?\d{4}[-.\s]?\d{4}/g)]),
-    keyPoints: ss.filter((s) => /\b(?:deve|precisa|necess[aá]rio|obrigat[oó]rio|prazo|taxa|gratuito|agendamento|atendimento)\b/i.test(s)).slice(0, 8),
-    disclaimer: 'A análise é informativa. Confirme requisitos, prazos e valores na fonte oficial.'
-  };
+  const t=normalize(text),ls=lines(t),ss=sentences(t);
+  return { title:ls[0]||'Serviço público', overview:ss.slice(0,3).join(' '), actions:hinted(ls,['comparecer','preencher','agendar','entregar','apresentar','enviar','protocolar','solicitar','acompanhar','retirar','pagar','assinar','cadastrar','acessar','anexar']), documents:hinted(ls,['documento','documentos','rg','cpf','comprovante','certidão','certidao','diploma','histórico','historico','laudo','declaração','declaracao']), deadlines:extractDateHits(t).map(x=>x.raw), costs:uniq(t.match(/R\$\s*\d{1,3}(?:\.\d{3})*(?:,\d{2})?/gi)||[]), contacts:uniq([...t.matchAll(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/ig)].map(m=>m[0])), keyPoints:ss.filter(s=>/\b(?:deve|precisa|necess[aá]rio|obrigat[oó]rio|prazo|taxa|gratuito|agendamento|atendimento)\b/i.test(s)).slice(0,8), disclaimer:'A análise é informativa. Confirme requisitos, prazos e valores na fonte oficial.' };
 }
+function hinted(ls,hints){return uniq(ls.filter(line=>hints.some(h=>normalizeAccents(line).includes(normalizeAccents(h)))));}
 
-function contestAnalyzeLocal(text, p) {
-  const t = normalize(text), lower = t.toLowerCase(), ls = lines(t), ss = sentences(t);
-  const salary = uniq(matches(t, /R\$\s*\d{1,3}(?:\.\d{3})*(?:,\d{2})?/gi)).slice(0, 12);
-  const dates = uniq(matches(t, /\b(?:\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|\d{1,2}\s+de\s+[A-Za-zçãõáéíóú]+\s+de\s+\d{4})\b/gi)).slice(0, 20);
-  const vacancies = uniq([...matches(t, /\b\d{1,5}\s+(?:vagas?|oportunidades?)\b/gi), ...matches(t, /\b(?:ampla concorr[eê]ncia|reserva de vagas)\b[^.\n]*/gi)]).slice(0, 12);
-  const education = uniq(ls.filter((x) => /ensino (fundamental|m[eé]dio|t[eé]cnico|superior)|gradua[cç][aã]o|bacharelado|licenciatura|p[oó]s-gradua[cç][aã]o|mestrado|doutorado/i.test(x))).slice(0, 12);
-  const stages = uniq(ls.filter((x) => /prova objetiva|prova discursiva|redação|redacao|avaliação de títulos|avaliacao de titulos|teste de aptidão física|teste de aptidao fisica|\btaf\b|entrevista|heteroidentificação|heteroidentificacao|perícia médica|pericia medica|curso de formação|curso de formacao|etapa|fase/i.test(x))).slice(0, 15);
-  const documents = hinted(ls, ['documento','documentos','rg','cpf','comprovante','certidão','certidao','diploma','histórico','historico','currículo','curriculo','laudo','declaração','declaracao','registro profissional']).slice(0, 15);
-  const actions = hinted(ls, ['comparecer','preencher','agendar','entregar','apresentar','enviar','protocolar','solicitar','acompanhar','inscrever','anexar']).slice(0, 15);
-  const cotas = [];
-  if (/pretos?|pardos?|pessoas negras|negros?\s+e\s+negras?|cota\s+ppp/i.test(t)) cotas.push('PPP');
-  if (/pessoa(?:s)?\s+com\s+defici[eê]ncia|\bpcd\b/i.test(t)) cotas.push('PCD');
-  if (/ind[ií]genas?/i.test(t)) cotas.push('INDÍGENAS');
-  if (/quilombolas?/i.test(t)) cotas.push('QUILOMBOLAS');
-  if (/cota|reserva\s+de\s+vagas|a[cç]([ãa])o\s+afirmativa/i.test(t)) cotas.push('OUTRAS');
+const MONTHS={janeiro:0,fevereiro:1,marco:2,março:2,abril:3,maio:4,junho:5,julho:6,agosto:7,setembro:8,outubro:9,novembro:10,dezembro:11};
+function parseSingleDate(raw) { let m=raw.match(/(\d{1,2})[\/-](\d{1,2})[\/-](\d{2,4})/); if(m){let y=+m[3]<100?2000+ +m[3]:+m[3];return new Date(y,+m[2]-1,+m[1]);} m=raw.toLowerCase().match(/(\d{1,2})\s+de\s+([a-zçãõáéíóú]+)\s+de\s+(\d{4})/); if(m&&MONTHS[m[2]]!==undefined)return new Date(+m[3],MONTHS[m[2]],+m[1]); return null; }
+function extractDateHits(text) { const out=[]; const re=/\b(?:\d{1,2}[\/-]\d{1,2}[\/-]\d{2,4}|\d{1,2}\s+de\s+[A-Za-zçãõáéíóú]+\s+de\s+\d{4})\b/gi; for(const match of text.matchAll(re)){ const before=text.slice(Math.max(0,match.index-120),match.index); const after=text.slice(match.index,Math.min(text.length,match.index+180)); const raw=match[0]; const date=parseSingleDate(raw); const context=(before+after).replace(/\s+/g,' ').trim(); out.push({raw,date,context,source:context}); } return out; }
+function eventLabel(context) { const c=normalizeAccents(context); const rules=[['Inscrições','periodo de inscricao|inscricao'],['Publicação do edital','publicacao do edital|publicado no dom'],['Resultado parcial','resultado parcial'],['Recursos','interposicao de recursos|solicitacao de recurso|recurso contra'],['Heteroidentificação / avaliação PCD','heteroidentificacao|avaliacao dos candidatos pcd|pericia'],['Resultado após recurso','resultado apos recurso'],['Resultado final','resultado final'],['Prova','prova objetiva|prova discursiva|exame'],['Convocação','convocacao']]; for(const [label,pattern] of rules) if(new RegExp(pattern,'i').test(c))return label; return 'Marco do edital'; }
+function extractTimeline(text) { const items=[]; const t=normalize(text); const add=(raw,start,end,index)=>{const line=t.slice(Math.max(0,index-180),Math.min(t.length,index+260)).replace(/\s+/g,' ').trim();items.push({raw,start,end:end||start,label:eventLabel(line),evidence:line});}; const rangeRe=/\b(\d{1,2}[\/-]\d{1,2}[\/-]\d{2,4})\s*(?:a|até|-|–)\s*(\d{1,2}[\/-]\d{1,2}[\/-]\d{2,4})\b/gi; const covered=[]; for(const m of t.matchAll(rangeRe)){const a=parseSingleDate(m[1]),b=parseSingleDate(m[2]);if(a&&b){add(m[0],a,b,m.index);covered.push([m.index,m.index+m[0].length]);}} const re=/\b(?:\d{1,2}[\/-]\d{1,2}[\/-]\d{2,4}|\d{1,2}\s+de\s+[A-Za-zçãõáéíóú]+\s+de\s+\d{4})\b/gi; for(const m of t.matchAll(re)){if(covered.some(([a,b])=>m.index>=a&&m.index<b))continue;const d=parseSingleDate(m[0]);if(d)add(m[0],d,d,m.index);} const seen=new Set();return items.filter(i=>i.start&&!((()=>{const k=`${i.label}|${dateKey(i.start)}|${dateKey(i.end)}`;if(seen.has(k))return true;seen.add(k);return false;})())).sort((a,b)=>a.start-b.start).slice(0,30); }
+function timelineStatus(item){const today=new Date(); today.setHours(0,0,0,0); const end=new Date(item.end); end.setHours(23,59,59,999); const start=new Date(item.start);start.setHours(0,0,0,0); if(end<today)return ['past','Encerrado']; if(start<=today&&end>=today)return ['today','Hoje']; return ['future','Próximo'];}
+function fmtDate(d){return d.toLocaleDateString('pt-BR',{day:'2-digit',month:'2-digit',year:'numeric'});}
 
-  const reasons = [], warnings = [], personalized = [], checklist = [];
-  let score = 50;
-  if (p.area) {
-    if (lower.includes(p.area.toLowerCase())) { score += 15; reasons.push(`A expressão da sua área (“${p.area}”) aparece no edital.`); }
-    else warnings.push(`Não apareceu uma menção direta à área “${p.area}”. Procure também pelo nome de cargos semelhantes.`);
-  }
-  if (p.education) {
-    const e = p.education.toLowerCase();
-    const compatible = lower.includes(e) || (/superior/.test(e) && /ensino superior|graduação|gradua[cç][aã]o/.test(lower)) || (/médio/.test(e) && /ensino médio|nível médio/.test(lower));
-    if (compatible) { score += 15; reasons.push('Há sinais textuais de compatibilidade com a escolaridade informada.'); }
-    else warnings.push('A escolaridade informada não apareceu claramente compatível; confira os requisitos do cargo.');
-  }
-  if (Number(p.experience) > 0) {
-    if (/experi[eê]ncia|tempo de servi[cç]o/.test(lower)) { score += 5; reasons.push('O edital menciona experiência/tempo de serviço; confira a quantidade exigida.'); }
-    else warnings.push('Sua experiência foi informada, mas não foi localizada exigência explícita no texto.');
-  }
-  if (p.modality) {
-    const m = p.modality.toUpperCase(), found = cotas.includes(m) || (m === 'PPP' && /pretos?|pardos?|pessoas negras/.test(lower));
-    if (found) { score += 10; reasons.push(`A modalidade ${m} aparece no edital.`); personalized.push(`Confira percentual reservado, critérios de autodeclaração e eventual heteroidentificação aplicáveis à modalidade ${m}.`); }
-    else warnings.push(`Não foi detectada a modalidade ${m}. Procure também anexos e tabelas de vagas.`);
-  }
-  if (/designer|design/i.test((p.area || '').toLowerCase()) && /designer|design|ux|ui|produto/i.test(lower)) { score += 5; personalized.push('Há referências relacionadas a design, UX/UI ou produto no texto.'); }
-  if (p.state && lower.includes(p.state.toLowerCase())) reasons.push(`O estado/região informado (${p.state}) aparece no texto.`);
-  if (dates.length) checklist.push('Registrar todas as datas e criar lembretes.');
-  if (salary.length) checklist.push('Comparar remuneração e jornada com o plano de carreira.');
-  if (documents.length) checklist.push('Separar documentos exigidos e verificar formato/validade.');
-  if (stages.length) checklist.push('Montar preparação por etapa do certame.');
-  if (cotas.length) checklist.push('Ler a seção de cotas/reserva de vagas e os anexos correspondentes.');
-  checklist.push('Conferir o requisito exato do cargo desejado no edital oficial.');
-  score = Math.max(0, Math.min(100, score));
-  return {
-    general: { title: ls.find((x) => /edital|concurso|processo seletivo/i.test(x)) || ls[0] || 'Edital', overview: ss.slice(0, 3).join(' '), salary, dates, vacancies, education, stages, documents, actions, contacts: uniq([...matches(t, /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/ig), ...matches(t, /(?:\+55\s*)?(?:\(?\d{2}\)?\s*)?(?:9\s*)?\d{4}[-.\s]?\d{4}/g)]), cotas, fee: uniq(matches(t, /taxa de inscri[cç][aã]o[^\n.]*/gi)).slice(0, 5) },
-    profile: { score, band: score >= 80 ? 'Alta' : score >= 60 ? 'Média' : 'Baixa', reasons, warnings, personalized, checklist: uniq(checklist) },
-    disclaimer: 'Use como guia de leitura. O edital oficial e os atos da banca organizadora prevalecem.'
-  };
+function extractQuotaSections(text) {
+  const ls=lines(text); const sections={}; const quotaDefs={PPP:['preto','pardo','negro','heteroidentificacao','autodeclaracao'],PCD:['pessoa com deficiencia','pcd','laudo','avaliacao dos candidatos pcd','pericia'],INDÍGENAS:['indigena','indigenas'],QUILOMBOLAS:['quilombola']};
+  for(const [name,hints] of Object.entries(quotaDefs)){ const hits=[]; ls.forEach((line,i)=>{const l=normalizeAccents(line);if(hints.some(h=>l.includes(h)))hits.push(...ls.slice(Math.max(0,i-2),Math.min(ls.length,i+3)));}); sections[name]=uniq(hits).slice(0,20); }
+  return sections;
 }
-
-function renderService(r) {
-  $('serviceResult').innerHTML = `<div class="result-head"><div><p class="eyebrow">RESULTADO</p><h2>${esc(r.title)}</h2><p>${esc(r.overview || 'Sem resumo claro no texto.')}</p></div><button class="secondary" onclick="window.print()">Imprimir</button></div><div class="result-grid"><article class="result-card"><h3>✅ O que fazer</h3><ul>${listHtml(r.actions)}</ul></article><article class="result-card"><h3>📄 Documentos</h3><ul>${listHtml(r.documents)}</ul></article><article class="result-card"><h3>⏱️ Prazos</h3><ul>${listHtml(r.deadlines)}</ul></article><article class="result-card"><h3>💰 Custos</h3><ul>${listHtml(r.costs)}</ul></article><article class="result-card"><h3>☎️ Contatos</h3><ul>${listHtml(r.contacts)}</ul></article><article class="result-card"><h3>🔎 Pontos importantes</h3><ul>${listHtml(r.keyPoints)}</ul></article></div><div class="callout">${esc(r.disclaimer)}</div>`;
-  $('serviceResult').classList.remove('hidden');
+function quotaAnalysis(text,p){
+  const t=normalizeAccents(text); const sections=extractQuotaSections(text); const found=[];
+  if(/pretos?|pardos?|pessoas negras|negros?/.test(t))found.push('PPP'); if(/pessoa[s]? com deficiencia|\bpcd\b/.test(t))found.push('PCD'); if(/indigenas?/.test(t))found.push('INDÍGENAS'); if(/quilombolas?/.test(t))found.push('QUILOMBOLAS');
+  const selected=p.modality||''; let focus=null; if(selected){ const evidence=sections[selected]||[]; const combined=normalizeAccents(evidence.join(' ')); const items=[]; if(selected==='PPP'){ if(/autodeclaracao/.test(combined))items.push({status:'editital',title:'Autodeclaração',detail:'O edital menciona a opção/autodeclaração para concorrer à reserva PPP.'}); if(/heteroidentificacao/.test(combined))items.push({status:'etapa',title:'Heteroidentificação',detail:'Há procedimento de heteroidentificação após a inscrição, conforme o texto detectado.'}); if(/documento|rg|cpf|certidao/.test(combined))items.push({status:'documento',title:'Documentos citados pelo edital',detail:uniq(evidence.filter(x=>/documento|rg|cpf|certidao/i.test(x))).slice(0,4).join(' ')}); if(!items.some(x=>x.status==='documento'))items.push({status:'not-found',title:'Documento específico de PPP',detail:'Não foi localizado no texto analisado um documento específico exigido para a cota PPP. Não inventamos uma exigência: confira o capítulo de cotas e os anexos.'}); }
+    else if(selected==='PCD'){ if(/laudo|relatorio|documento/.test(combined))items.push({status:'documento',title:'Documentação PCD citada',detail:uniq(evidence.filter(x=>/laudo|relatorio|documento/i.test(x))).slice(0,5).join(' ')}); else items.push({status:'not-found',title:'Documento específico de PCD',detail:'Não foi localizado no trecho analisado um laudo/documento específico. Confira o anexo e as instruções da banca.'}); if(/avaliacao|pericia/.test(combined))items.push({status:'etapa',title:'Avaliação/perícia',detail:'O edital menciona etapa de avaliação para candidatos PCD.'}); }
+    else { items.push({status:'source',title:'Evidências localizadas',detail: eviText(evidence)}); }
+    focus={found:selected?found.includes(selected):false, items}; }
+  return {found,focus,sections};
 }
-function renderContest(r) {
-  const g = r.general, p = r.profile;
-  const stats = [['Vagas', g.vacancies.length ? g.vacancies.join(' · ') : 'Não identificado'], ['Remuneração', g.salary.length ? g.salary.slice(0, 3).join(' · ') : 'Não identificado'], ['Taxa', g.fee.length ? g.fee[0] : 'Não identificada'], ['Cotas', g.cotas.length ? g.cotas.join(' · ') : 'Não identificadas']];
-  $('contestResult').innerHTML = `<div class="result-head"><div><p class="eyebrow">RADAR DE CONCURSOS</p><h2>${esc(g.title)}</h2><p>${esc(g.overview || 'Resumo não localizado; consulte o texto original.')}</p></div><button class="secondary" onclick="window.print()">Imprimir</button></div><div class="score"><div class="score-number">${p.score}</div><div class="score-copy"><b>Compatibilidade ${esc(p.band)}</b><div>${esc(p.reasons[0] || 'Índice indicativo baseado no perfil e nas expressões encontradas.')}</div></div></div><div class="mini-stat-grid">${stats.map(([a,b]) => `<div class="mini-stat"><small>${esc(a)}</small><b>${esc(b)}</b></div>`).join('')}</div><div class="result-grid"><article class="result-card"><h3>📌 Para todo candidato</h3><p class="list-title">Datas e prazos</p><ul>${listHtml(g.dates)}</ul><p class="list-title">Etapas</p><ul>${listHtml(g.stages)}</ul></article><article class="result-card"><h3>🎯 Para o seu perfil</h3><p class="list-title">Pontos favoráveis</p><ul>${listHtml(p.reasons, 'Nenhum ponto favorável detectado automaticamente.')}</ul><p class="list-title">Aplicações específicas</p><ul>${listHtml(p.personalized, 'Nenhuma regra específica adicional detectada.')}</ul></article><article class="result-card"><h3>🧾 Requisitos e documentos</h3><p class="list-title">Escolaridade</p><ul>${listHtml(g.education)}</ul><p class="list-title">Documentos</p><ul>${listHtml(g.documents)}</ul></article><article class="result-card"><h3>🏷️ Cotas e reserva de vagas</h3><div>${g.cotas.length ? g.cotas.map((x) => `<span class="tag">${esc(x)}</span>`).join(' ') : '<p>Não identificadas no trecho analisado.</p>'}</div><div class="callout">Confira o quadro de vagas, critérios de enquadramento e anexos da modalidade.</div></article><article class="result-card"><h3>⚠️ Pontos de atenção</h3><ul>${listHtml(p.warnings, 'Nenhum alerta automático. Mesmo assim, confira o edital integral.')}</ul></article><article class="result-card"><h3>✅ Checklist personalizado</h3><ul>${listHtml(p.checklist)}</ul></article></div><div class="callout danger">${esc(r.disclaimer)}</div>`;
-  $('contestResult').classList.remove('hidden');
-}
+function eviText(a){ return a?.length?a.slice(0,8).join(' '):'Nenhuma evidência específica localizada.'; }
 
-async function readFileText(file) {
-  if (file.type !== 'application/pdf' && !/\.pdf$/i.test(file.name)) {
-    return file.text();
-  }
+async function ensureEmbeddingPipe(statusEl){ if(embeddingPipe)return embeddingPipe; if(statusEl){statusEl.textContent='Carregando IA local pela primeira vez… (o modelo fica em cache no navegador)';statusEl.className='status loading';} embeddingPipe=await pipeline('feature-extraction',MODEL_ID,{dtype:'q8'}); return embeddingPipe; }
+function cosine(a,b){let dot=0,na=0,nb=0;for(let i=0;i<a.length;i++){dot+=a[i]*b[i];na+=a[i]*a[i];nb+=b[i]*b[i];}return dot/(Math.sqrt(na)*Math.sqrt(nb)||1);}
+function tensorToArray(output){ return output.tolist ? output.tolist().flat(Infinity) : Array.from(output.data||[]); }
+function roleCandidates(text){ const ls=lines(text); const roleLines=[]; const roleRe=/\b(cargo|função|funcao|emprego|especialidade|área de atuação|area de atuacao)\b/i; for(const [i,l] of ls.entries()){if(roleRe.test(l)||/\b(?:analista|assistente|agente|designer|engenheiro|professor|t[eé]cnico|contador|advogado|administrador|psic[oó]logo|jornalista|desenvolvedor|auditor|coordenador|especialista)\b/i.test(l)) roleLines.push(...ls.slice(Math.max(0,i-1),Math.min(ls.length,i+3)));} return uniq(roleLines).slice(0,30); }
+async function semanticAreaMatch(text,p,statusEl){ const inferred=inferArea(p.area,p.details); const candidates=roleCandidates(text); if(!p.area||!candidates.length)return {inferred,roles:[],aiUsed:false}; try { const pipe=await ensureEmbeddingPipe(statusEl); const profileText=[p.area,p.details,inferred.primary.canonical,...inferred.related.slice(0,5)].filter(Boolean).join('. '); const base=tensorToArray(await pipe(profileText,{pooling:'mean',normalize:true})); const embList=tensorToArray(await pipe(candidates,{pooling:'mean',normalize:true})); const dim=base.length; const roles=candidates.map((label,i)=>({label,score:Math.max(0,Math.min(1,cosine(base,embList.slice(i*dim,(i+1)*dim))))})).sort((a,b)=>b.score-a.score).slice(0,8); const best=roles.length?roles[0].score:0; return {inferred,roles:roles.map(r=>({...r,percent:Math.round(r.score*100)})),aiUsed:true}; } catch(err){ console.warn('IA local indisponível',err); return {inferred,roles:[],aiUsed:false}; } }
 
-  // PDF.js 6.x: browser-side extraction, no upload to our server.
-  // Scripting is explicitly disabled because PDFs can contain active content.
-  const pdfjs = await import('https://cdn.jsdelivr.net/npm/pdfjs-dist@6.3.289/build/pdf.mjs');
-  pdfjs.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@6.3.289/build/pdf.worker.mjs';
-  const buffer = await file.arrayBuffer();
-  const pdf = await pdfjs.getDocument({ data: new Uint8Array(buffer), enableScripting: false }).promise;
-  const pages = [];
-  for (let i = 1; i <= pdf.numPages; i++) {
-    const page = await pdf.getPage(i);
-    const content = await page.getTextContent();
-    pages.push(content.items.map((item) => item.str || '').join(' '));
-  }
-  const text = pages.join('\n\n').trim();
-  if (!text) {
-    throw new Error('Não foi encontrado texto selecionável neste PDF. Ele pode ser escaneado como imagem.');
-  }
-  return text;
-}
+function generalExtract(text){ const t=normalize(text),ls=lines(t),ss=sentences(t); const salary=uniq(t.match(/R\$\s*\d{1,3}(?:\.\d{3})*(?:,\d{2})?/gi)||[]); const vacancies=uniq([...t.matchAll(/\b\d{1,5}\s+(?:vagas?|oportunidades?)\b/gi)].map(m=>m[0])).slice(0,12); const education=uniq(ls.filter(x=>/ensino (fundamental|m[eé]dio|t[eé]cnico|superior)|gradua[cç][aã]o|bacharelado|licenciatura|p[oó]s-gradua[cç][aã]o|mestrado|doutorado/i.test(x))).slice(0,12); const stages=uniq(ls.filter(x=>/prova objetiva|prova discursiva|reda[cç][aã]o|avalia[cç][aã]o de t[ií]tulos|teste de aptid[aã]o f[ií]sica|\btaf\b|entrevista|heteroidentifica[cç][aã]o|per[ií]cia m[eé]dica|curso de forma[cç][aã]o|etapa|fase/i.test(x))).slice(0,15); const docs=hinted(ls,['documento','documentos','rg','cpf','comprovante','certidão','certidao','diploma','histórico','historico','currículo','curriculo','laudo','declaração','declaracao','registro profissional']).slice(0,20); const fee=uniq([...t.matchAll(/taxa de inscri[cç][aã]o[^\n.]*/gi)].map(m=>m[0])).slice(0,5); return {title:ls.find(x=>/edital|concurso|processo seletivo/i.test(x))||ls[0]||'Edital',overview:ss.slice(0,3).join(' '),salary,vacancies,education,stages,docs,fee,dates:extractTimeline(text),cotas:uniq([.../pretos?|pardos?|pessoas negras|negros?/i.test(t)?['PPP']:[],.../pessoa[s]? com defici[eê]ncia|\bpcd\b/i.test(t)?['PCD']:[],.../ind[ií]genas?/i.test(t)?['INDÍGENAS']:[],.../quilombolas?/i.test(t)?['QUILOMBOLAS']:[]])}; }
 
-async function handleFileInput(inputId, textId, countId, statusId, max) {
-  const input = $(inputId);
-  const file = input.files?.[0];
-  if (!file) return;
-  const status = $(statusId);
-  const textarea = $(textId);
-  const count = $(countId);
-  status.textContent = `Lendo “${file.name}”…`;
-  status.className = 'status loading';
-  try {
-    const text = await readFileText(file);
-    if (text.length > max) {
-      textarea.value = text.slice(0, max);
-      count.textContent = `${max.toLocaleString('pt-BR')} / ${max.toLocaleString('pt-BR')}`;
-      status.textContent = `Arquivo lido. O texto foi limitado aos primeiros ${max.toLocaleString('pt-BR')} caracteres.`;
-    } else {
-      textarea.value = text;
-      count.textContent = `${text.length.toLocaleString('pt-BR')} / ${max.toLocaleString('pt-BR')}`;
-      status.textContent = `✅ “${file.name}” carregado. Agora clique em “${inputId === 'contestFile' ? 'Encontrar o que importa' : 'Analisar'}”.`;
-    }
-    status.className = 'status success';
-    textarea.focus();
-  } catch (err) {
-    console.error(err);
-    status.textContent = `❌ Não consegui ler “${file.name}”. ${err?.message || 'Tente outro PDF ou cole o texto do edital.'}`;
-    status.className = 'status error';
-    textarea.focus();
-  } finally {
-    // Allow selecting the same file again and retriggering the handler.
-    input.value = '';
-  }
-}
+function scoreProfile(g,p,areaAI,quota,rawText=''){ let score=25;const reasons=[],warnings=[]; if(p.education&&g.education.join(' ').toLowerCase().includes(p.education.toLowerCase())){score+=20;reasons.push('A escolaridade informada aparece no edital.');} else if(p.education){warnings.push('A escolaridade informada não apareceu claramente no trecho extraído.');} if(p.state&&normalizeAccents(rawText).includes(normalizeAccents(p.state))) {score+=5;reasons.push(`A região ${p.state} aparece no conteúdo analisado.`);} if(areaAI.roles.length){const top=areaAI.roles[0].percent;if(top>=78){score+=30;reasons.push(`A IA encontrou alta proximidade semântica com “${areaAI.roles[0].label.slice(0,120)}”.`);} else if(top>=60){score+=20;reasons.push(`A IA encontrou cargo(s) relacionado(s) à sua área.`);} else warnings.push('A IA não encontrou proximidade forte com os títulos capturados; confira cargos e anexos.');} else {const inferred=areaAI.inferred;const t=normalizeAccents(g.title);if(p.area&&t.includes(normalizeAccents(p.area))) {score+=20;reasons.push('O nome informado para sua área aparece no título/trecho principal.');} else if(inferred.primary.canonical!==p.area){warnings.push(`A área foi interpretada como “${inferred.primary.canonical}”.`);} else warnings.push('Não foi encontrada menção direta à sua área; veja áreas correlatas.');} if(p.experience&&/experi[eê]ncia|tempo de servi[cç]o/i.test(g.docs.join(' ')+g.overview))reasons.push('O edital menciona experiência/tempo de serviço; confira o quantitativo exigido.'); if(p.modality){if(g.cotas.includes(p.modality)){score+=10;reasons.push(`A modalidade ${p.modality} está presente no edital.`);}else warnings.push(`A modalidade ${p.modality} não foi localizada; confira anexos e quadro de reservas.`);} return {score:Math.max(0,Math.min(100,Math.round(score))),band:score>=80?'Alta':score>=60?'Média':'Baixa',reasons,warnings}; }
 
-function saveHistory(type, data) {
-  try {
-    const items = JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]');
-    items.unshift({ id: Date.now(), type, title: type === 'contest' ? data.general.title : data.title, data });
-    localStorage.setItem(HISTORY_KEY, JSON.stringify(items.slice(0, 12)));
-  } catch { /* optional */ }
-}
+function contestAnalyzeLocal(text,p,areaAI={inferred:inferArea(p.area,p.details),roles:[]}) { const g=generalExtract(text); const quota=quotaAnalysis(text,p); const profileScore=scoreProfile(g,p,areaAI,quota,text); const checklist=[]; if(g.dates.length)checklist.push('Registrar as datas críticas no calendário.'); if(g.docs.length)checklist.push('Separar a documentação geral e conferir formato, validade e envio.'); if(quota.focus?.items?.length)checklist.push(`Conferir o bloco de documentos e etapas da modalidade ${p.modality||'selecionada'}.`); if(g.stages.length)checklist.push('Montar preparação por etapa.'); checklist.push('Conferir o requisito literal do cargo no edital oficial.'); return {general:g,profile:{...profileScore,areaAI,quota,checklist:uniq(checklist)},disclaimer:'Índice e correlação são auxiliares. O edital oficial, seus anexos e os atos da banca prevalecem.'}; }
 
-$('serviceAnalyze').addEventListener('click', () => {
-  const text = $('serviceText').value.trim();
-  if (!text) return ($('serviceStatus').textContent = 'Cole um texto antes de analisar.');
-  $('serviceStatus').textContent = 'Analisando no navegador…';
-  renderService(serviceAnalyzeLocal(text));
-  $('serviceStatus').textContent = 'Análise concluída sem enviar o texto para servidor.';
-});
-$('contestAnalyze').addEventListener('click', () => {
-  const text = $('contestText').value.trim();
-  if (!text) return ($('contestStatus').textContent = 'Cole o texto do edital antes de analisar.');
-  const p = profile();
-  localStorage.setItem(PROFILE_KEY, JSON.stringify(p));
-  $('contestStatus').textContent = 'Cruzando edital + perfil…';
-  const result = contestAnalyzeLocal(text, p);
-  renderContest(result);
-  saveHistory('contest', result);
-  $('contestStatus').textContent = 'Radar concluído localmente.';
-});
-$('saveProfile').addEventListener('click', saveProfile);
-$('clearProfile').addEventListener('click', clearProfile);
-$('serviceText').addEventListener('input', () => { $('serviceCount').textContent = `${$('serviceText').value.length.toLocaleString('pt-BR')} / 30.000`; });
-$('contestText').addEventListener('input', () => { $('contestCount').textContent = `${$('contestText').value.length.toLocaleString('pt-BR')} / 60.000`; });
-$('serviceFile').addEventListener('change', () => handleFileInput('serviceFile', 'serviceText', 'serviceCount', 'serviceStatus', 30000));
-$('contestFile').addEventListener('change', () => handleFileInput('contestFile', 'contestText', 'contestCount', 'contestStatus', 60000));
-document.querySelectorAll('.nav-btn').forEach((btn) => btn.addEventListener('click', () => { document.querySelectorAll('.nav-btn').forEach((x) => x.classList.remove('active')); btn.classList.add('active'); document.querySelectorAll('.tab-panel').forEach((x) => x.classList.remove('active')); $(btn.dataset.tab === 'services' ? 'servicesTab' : btn.dataset.tab === 'contests' ? 'contestsTab' : 'profileTab').classList.add('active'); }));
+function renderService(r){ $('serviceResult').innerHTML=`<div class="result-head"><div><span class="eyebrow">RESULTADO</span><h2>${esc(r.title)}</h2><p>${esc(r.overview||'Sem resumo claro no texto.')}</p></div><button class="secondary" onclick="window.print()">Imprimir</button></div><div class="result-grid"><article class="result-card"><h3>✅ O que fazer</h3><ul>${listHtml(r.actions)}</ul></article><article class="result-card"><h3>📄 Documentos</h3><ul>${listHtml(r.documents)}</ul></article><article class="result-card"><h3>⏱️ Prazos</h3><ul>${listHtml(r.deadlines)}</ul></article><article class="result-card"><h3>💰 Custos</h3><ul>${listHtml(r.costs)}</ul></article><article class="result-card"><h3>☎️ Contatos</h3><ul>${listHtml(r.contacts)}</ul></article><article class="result-card"><h3>🔎 Pontos importantes</h3><ul>${listHtml(r.keyPoints)}</ul></article></div><div class="callout">${esc(r.disclaimer)}</div>`; $('serviceResult').classList.remove('hidden'); }
+function renderTimeline(items){ if(!items.length)return '<div class="empty-state">Nenhuma data estruturada foi localizada.</div>'; return `<div class="timeline">${items.map(i=>{const [status,label]=timelineStatus(i);return `<div class="timeline-item ${status}"><div class="timeline-date"><strong>${fmtDate(i.start)}</strong>${i.end&&dateKey(i.end)!==dateKey(i.start)?`<span>até ${fmtDate(i.end)}</span>`:''}</div><div class="timeline-dot" aria-hidden="true"></div><div class="timeline-body"><div class="timeline-label"><b>${esc(i.label)}</b><span class="status-pill ${status}">${label}</span></div><p>${esc(i.evidence.slice(0,240))}</p></div></div>`;}).join('')}</div>`; }
+function renderAreaAI(ai,p){ const primary=ai.inferred?.primary; const roleHtml=ai.roles.length?`<div class="role-list">${ai.roles.slice(0,6).map((r,idx)=>`<div class="role-item"><div><span class="rank">${idx+1}</span><b>${esc(r.label.slice(0,120))}</b></div><strong>${r.percent}%</strong></div>`).join('')}</div>`:'<div class="empty-state">A IA não capturou títulos de cargo suficientes no texto. A área correlata ainda pode orientar sua busca.</div>'; return `<div class="ai-panel"><div class="ai-panel-head"><div><span class="ai-badge">✦ IA LOCAL · ${ai.aiUsed?'ATIVA':'MODO DE SEGURANÇA'}</span><h3>Onde sua área se encaixa</h3><p>Baseado em semelhança semântica e termos do seu perfil.</p></div><span class="ai-main-area">${esc(primary?.canonical||p.area||'Área não identificada')}</span></div>${primary?.related?.length?`<div class="chip-row large">${primary.related.map(x=>`<span>${esc(x)}</span>`).join('')}</div>`:''}${roleHtml}<div class="ai-note">A porcentagem é <b>proximidade de linguagem</b>, não probabilidade de aprovação nem comprovação de requisito.</div></div>`; }
+function renderQuota(q,p){ const tags=q.found.map(x=>`<span class="tag">${esc(x)}</span>`).join(' '); let body=''; if(q.focus){body=`<div class="quota-focus-head"><span class="quota-selected">Sua modalidade: ${esc(p.modality)}</span><b>${q.focus.found?'Encontrada no edital':'Não localizada'}</b></div><div class="quota-docs">${q.focus.items.map(i=>`<div class="quota-item ${i.status}"><span class="quota-icon">${i.status==='documento'?'📄':i.status==='etapa'?'⏱️':i.status==='editital'?'✓':'?'}</span><div><b>${esc(i.title)}</b><p>${esc(i.detail)}</p></div></div>`).join('')}</div>`;} else body='<div class="empty-state">Selecione uma modalidade no seu perfil para receber uma leitura específica.</div>'; return `<article class="result-card quota-card"><h3>🏷️ Sua cota e seus documentos</h3><div class="tag-row">${tags||'<span class="muted">Nenhuma cota identificada.</span>'}</div>${body}<div class="callout">Não inventamos documento: quando o edital não especifica uma exigência, mostramos “não localizado” e apontamos onde conferir.</div></article>`; }
+function renderContest(r){ const g=r.general,p=r.profile; const stats=[['Vagas',g.vacancies.length?g.vacancies.join(' · '):'Não identificado'],['Remuneração',g.salary.length?g.salary.slice(0,3).join(' · '):'Não identificada'],['Taxa',g.fee.length?g.fee[0]:'Não identificada'],['Modalidades',g.cotas.length?g.cotas.join(' · '):'Não identificadas']]; const next=g.dates.find(x=>timelineStatus(x)[0]==='future'); $('contestResult').innerHTML=`<div class="result-head result-head-sticky"><div><span class="eyebrow">RADAR PERSONALIZADO</span><h2>${esc(g.title)}</h2><p>${esc(g.overview||'Resumo não localizado; consulte o texto original.')}</p></div><div class="result-actions"><button class="secondary" onclick="window.print()">Imprimir</button></div></div><section class="score-hero"><div class="score-circle">${p.score}</div><div><span class="eyebrow">COMPATIBILIDADE INDICATIVA</span><h3>${esc(p.band)}</h3><p>${esc(p.reasons[0]||'Cruzamento baseado no perfil e nas evidências encontradas.')}</p></div>${next?`<div class="next-deadline"><small>PRÓXIMO MARCO</small><b>${esc(next.label)}</b><span>${fmtDate(next.start)}</span></div>`:''}</section><div class="mini-stat-grid">${stats.map(([a,b])=>`<div class="mini-stat"><small>${esc(a)}</small><b>${esc(b)}</b></div>`).join('')}</div><div class="primary-grid"><article class="result-card"><h3>🧠 Para o seu perfil</h3>${renderAreaAI(p.areaAI,getProfile())}<div class="split-box"><div><span class="list-title">Pontos favoráveis</span><ul>${listHtml(p.reasons,'Nenhum sinal positivo identificado.')}</ul></div><div><span class="list-title">Pontos de atenção</span><ul>${listHtml(p.warnings,'Nenhum alerta automático.')}</ul></div></div></article><article class="result-card"><h3>📅 Linha do tempo</h3>${renderTimeline(g.dates)}</article></div><div class="result-grid"><article class="result-card"><h3>🎯 Requisitos gerais</h3><p class="list-title">Escolaridade</p><ul>${listHtml(g.education)}</ul><p class="list-title">Etapas</p><ul>${listHtml(g.stages)}</ul></article><article class="result-card"><h3>🧾 Documentação geral</h3><ul>${listHtml(g.docs)}</ul><div class="callout">Separe aqui tudo o que o edital pede para todos os candidatos. A documentação específica de cota aparece em bloco separado.</div></article>${renderQuota(p.quota,getProfile())}<article class="result-card"><h3>✅ Checklist de ação</h3><ul>${listHtml(p.checklist)}</ul></article><article class="result-card"><h3>⚠️ Evidências e limites</h3><p>A IA ajuda a localizar relações e obrigações, mas não “decide” sua elegibilidade. Sempre confira o item do cargo, o quadro de vagas, anexos e atos posteriores.</p></article></div><div class="callout danger">${esc(r.disclaimer)}</div>`; $('contestResult').classList.remove('hidden'); }
+
+async function readFileText(file){ if(file.type!=='application/pdf'&&!/\.pdf$/i.test(file.name))return file.text(); const pdfjs=await import('https://cdn.jsdelivr.net/npm/pdfjs-dist@6.3.289/build/pdf.mjs'); pdfjs.GlobalWorkerOptions.workerSrc='https://cdn.jsdelivr.net/npm/pdfjs-dist@6.3.289/build/pdf.worker.mjs'; const buffer=await file.arrayBuffer(); const pdf=await pdfjs.getDocument({data:new Uint8Array(buffer),enableScripting:false}).promise;const pages=[];for(let i=1;i<=pdf.numPages;i++){const page=await pdf.getPage(i);const content=await page.getTextContent();pages.push(content.items.map(item=>item.str||'').join(' '));}const text=pages.join('\n\n').trim();if(!text)throw new Error('Este PDF parece ser escaneado como imagem. A versão atual precisa de texto selecionável.');return text; }
+async function handleFileInput(inputId,textId,countId,statusId,max){const input=$(inputId),file=input.files?.[0];if(!file)return;const status=$(statusId);try{status.textContent=`Lendo “${file.name}”…`;status.className='status loading';const text=await readFileText(file);$(textId).value=text.slice(0,max);$(countId).textContent=`${Math.min(text.length,max).toLocaleString('pt-BR')} / ${max.toLocaleString('pt-BR')}`;$('fileStatus').innerHTML=`<span class="file-status-icon success-icon">✓</span><span><b>${esc(file.name)}</b><small>${text.length>max?'Texto carregado com limite de caracteres.':'Edital carregado e pronto para análise.'}</small></span>`;status.textContent='Arquivo pronto. Agora clique em “Encontrar o que importa”.';status.className='status success';$(textId).focus();}catch(err){console.error(err);status.textContent=`Não consegui ler “${file.name}”. ${err.message||'Tente outro arquivo ou cole o texto.'}`;status.className='status error';}finally{input.value='';}}
+function saveHistory(data){try{const items=JSON.parse(localStorage.getItem(HISTORY_KEY)||'[]');items.unshift({id:Date.now(),title:data.general.title,data});localStorage.setItem(HISTORY_KEY,JSON.stringify(items.slice(0,10)));}catch{}}
+
+$('profileArea').addEventListener('input',()=>refreshAreaMap(true)); $('profileDetails').addEventListener('input',()=>refreshAreaMap(true)); $('saveProfile').addEventListener('click',saveProfile); $('clearProfile').addEventListener('click',clearProfile);
+$('serviceText').addEventListener('input',()=>{$('serviceCount').textContent=`${$('serviceText').value.length.toLocaleString('pt-BR')} / 30.000`;});
+$('contestText').addEventListener('input',()=>{$('contestCount').textContent=`${$('contestText').value.length.toLocaleString('pt-BR')} / 80.000`;});
+$('serviceFile').addEventListener('change',()=>handleFileInput('serviceFile','serviceText','serviceCount','serviceStatus',30000));
+$('contestFile').addEventListener('change',()=>handleFileInput('contestFile','contestText','contestCount','contestStatus',80000));
+$('forceLocalAI').addEventListener('click',()=>alert('A área é cruzada com um mapa de profissões + um modelo multilíngue rodando no próprio navegador. Na primeira análise, o modelo é baixado e depois fica em cache. Não é necessária chave de API.'));
+$('contestAnalyze').addEventListener('click',async()=>{const text=$('contestText').value.trim();if(!text){$('contestStatus').textContent='Carregue ou cole o texto do edital antes de analisar.';$('contestStatus').className='status error';return;}const p=getProfile();localStorage.setItem(PROFILE_KEY,JSON.stringify(p));$('contestStatus').textContent='Preparando o cruzamento com seu perfil…';$('contestStatus').className='status loading';try{const areaAI=await semanticAreaMatch(text,p,$('contestStatus'));const result=contestAnalyzeLocal(text,p,areaAI);renderContest(result);saveHistory(result);$('contestStatus').textContent=areaAI.aiUsed?'Radar concluído com IA local.':'Radar concluído com modo de segurança; a IA não pôde ser carregada.';$('contestStatus').className='status success';}catch(err){console.error(err);const result=contestAnalyzeLocal(text,p,{inferred:inferArea(p.area,p.details),roles:[],aiUsed:false});renderContest(result);$('contestStatus').textContent='Radar concluído em modo de segurança.';$('contestStatus').className='status success';}});
+document.querySelectorAll('.nav-btn').forEach(btn=>btn.addEventListener('click',()=>{document.querySelectorAll('.nav-btn').forEach(x=>x.classList.remove('active'));btn.classList.add('active');document.querySelectorAll('.tab-panel').forEach(x=>x.classList.remove('active'));$(btn.dataset.tab==='services'?'servicesTab':btn.dataset.tab==='contests'?'contestsTab':'profileTab').classList.add('active');}));
 loadProfile();

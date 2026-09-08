@@ -1,37 +1,44 @@
-# Produto — Cidadão Claro 2.0
+# Cidadão Claro — Produto v3
 
 ## Problema
 
-Editais e páginas de serviço público concentram regras, datas e exceções em textos longos. O custo de interpretar isso é especialmente alto para candidatos que precisam descobrir rapidamente se uma vaga é adequada ao seu perfil e quais obrigações se aplicam a eles.
+Editais concentram requisitos, cronogramas, cargos e regras de reserva de vagas em documentos longos. O usuário precisa descobrir rapidamente “qual cargo combina comigo?”, “qual é o próximo prazo?” e “o que minha modalidade exige?”.
 
 ## Proposta
 
-Uma interface que transforma o documento original em uma leitura operacional: "o que importa para todo mundo" + "o que importa para você".
+Um leitor local que transforma o edital em um painel de decisão: visão geral + encaixe de perfil + áreas correlatas + linha do tempo + documentação geral + regras específicas de cota.
 
-## Público principal
+## ICP inicial
 
-- candidatos a concursos e processos seletivos;
-- pessoas buscando programas e serviços públicos;
-- estudantes e trabalhadores que precisam interpretar chamadas públicas.
+- pessoas que acompanham concursos e processos seletivos;
+- profissionais que não sabem quais cargos correlatos procurar;
+- candidatos que têm dificuldade em separar cronograma geral de etapas específicas de cotas;
+- usuários que preferem não cadastrar documentos pessoais em plataformas.
 
-## Diferencial
+## Critérios de produto
 
-O produto não tenta substituir o edital. Ele cria uma camada de leitura personalizada em cima do texto fornecido pelo usuário.
+1. **A evidência vem do edital**: a interface diferencia encontrado, relacionado e não localizado.
+2. **Cota não é inferida como documento**: se o texto não exigir um documento, o sistema informa que ele não foi localizado.
+3. **IA é assistiva**: a proximidade semântica apoia a descoberta de cargos; não decide elegibilidade.
+4. **Prazos têm prioridade**: datas são ordenadas e recebem estado encerrado/hoje/próximo.
+5. **Privacidade por padrão**: perfil em localStorage; sem cadastro e sem API obrigatória.
 
-## Métricas do MVP
+## Roadmap
 
-- tempo até primeira análise;
-- percentual de análises salvas;
-- uso do Radar de Concursos;
-- taxa de retorno ao produto;
-- quantidade de itens de checklist concluídos.
+### V3.1
+- OCR opcional no navegador para PDFs escaneados;
+- extração de tabelas de vagas por cargo;
+- detecção de banca/órgão e fonte oficial;
+- botão “abrir item do edital” com contexto por página quando o PDF permitir.
 
-## Critérios de aceite
+### V3.2
+- ranking de cargos + filtros por UF, remuneração e escolaridade;
+- modo “quero só cargos acima de X salário”;
+- exportação do cronograma em ICS;
+- PWA offline para análises já carregadas.
 
-1. O site abre sem backend.
-2. O perfil pode ser salvo e apagado localmente.
-3. Um edital pode ser analisado sem IA.
-4. O resultado separa dados gerais de dados específicos do perfil.
-5. A modalidade PPP pode ser detectada quando o termo/descrição estiver presente no edital.
-6. O usuário recebe um aviso para conferir o edital oficial.
-7. Nenhuma chave secreta é embutida no frontend.
+### V4
+- base pública de editais e histórico;
+- alertas opt-in;
+- comparação entre editais;
+- assistente de estudos por etapa.

@@ -1,6 +1,6 @@
 {
   "name": "cidadao-claro",
-  "version": "2.0.0",
+  "version": "3.0.0",
   "private": true,
   "type": "module",
   "description": "Cidadão Claro: analisador local de serviços públicos e editais de concursos, com compatibilidade por perfil.",
