@@ -1,7 +1,141 @@
-<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Cidadão Claro — leitura local de serviços públicos e editais de concursos por perfil."><title>Cidadão Claro 2.0</title><link rel="stylesheet" href="styles.css"></head><body>
-<header class="topbar"><a class="brand" href="#top">Cidadão <span>Claro</span></a><nav><button class="nav-btn active" data-tab="services">Serviços públicos</button><button class="nav-btn" data-tab="contests">Radar de concursos</button><button class="nav-btn" data-tab="profile">Meu perfil</button></nav></header>
-<main class="shell" id="top"><section class="hero"><div><p class="eyebrow">ACESSO À INFORMAÇÃO</p><h1>Menos burocratês. Mais clareza para decidir.</h1><p class="lead">Transforme textos públicos em tarefas, prazos e pontos de atenção. No Radar de Concursos, veja o que importa <strong>para o seu perfil</strong>.</p></div><div class="hero-badges"><span>100% local</span><span>Sem cadastro</span><span>Open-source</span></div></section>
-<section id="servicesTab" class="tab-panel active"><div class="card input-card"><div class="card-head"><div><p class="eyebrow">MODO 01</p><h2>Entenda um serviço público</h2><p>Cole um comunicado, orientação ou texto institucional.</p></div><label class="file-label">Carregar .txt/.md<input id="serviceFile" type="file" accept=".txt,.md,.pdf,text/plain,text/markdown,application/pdf" hidden></label></div><textarea id="serviceText" maxlength="30000" placeholder="Cole aqui o texto oficial…"></textarea><div class="input-foot"><span id="serviceCount">0 / 30.000</span><button id="serviceAnalyze" class="primary">Analisar</button></div><p id="serviceStatus" class="status" role="status"></p></div><section id="serviceResult" class="result-wrap hidden"></section></section>
-<section id="contestsTab" class="tab-panel"><div class="two-col"><section class="card profile-mini"><p class="eyebrow">SEU PERFIL</p><h2>Quem está analisando?</h2><div class="form-grid"><label>Área / profissão<input id="profileArea" placeholder="Ex.: Designer de produto"></label><label>Escolaridade<select id="profileEducation"><option value="">Selecionar</option><option>Ensino médio</option><option>Ensino técnico</option><option>Ensino superior</option><option>Pós-graduação</option><option>Mestrado</option><option>Doutorado</option></select></label><label>Anos de experiência<input id="profileExperience" type="number" min="0" max="60" placeholder="Ex.: 4"></label><label>UF / região<input id="profileState" placeholder="Ex.: RJ"></label><label>Modalidade/cota<select id="profileModality"><option value="">Ampla concorrência</option><option value="PPP">PPP — pretos e pardos</option><option value="PCD">PCD</option><option value="INDÍGENAS">Indígenas</option><option value="QUILOMBOLAS">Quilombolas</option></select></label></div><button id="saveProfile" class="secondary full">Salvar perfil neste navegador</button><p class="privacy-note">O perfil fica apenas no navegador neste modo.</p></section><section class="card input-card"><p class="eyebrow">EDITAL</p><h2>Cole o edital</h2><p>O analisador procura vagas, remuneração, datas, taxa, requisitos, etapas e cotas.</p><label class="file-label file-wide">Carregar edital .txt/.md/.pdf<input id="contestFile" type="file" accept=".txt,.md,.pdf,text/plain,text/markdown,application/pdf" hidden></label><textarea id="contestText" maxlength="60000" placeholder="Cole o texto do edital aqui…"></textarea><div class="input-foot"><span id="contestCount">0 / 60.000</span><button id="contestAnalyze" class="primary">Encontrar o que importa</button></div><p id="contestStatus" class="status" role="status"></p></section></div><section id="contestResult" class="result-wrap hidden"></section></section>
-<section id="profileTab" class="tab-panel"><section class="card"><p class="eyebrow">PRIVACIDADE</p><h2>Meu perfil</h2><p>Use o perfil para personalizar a leitura de editais. Não é uma inscrição nem comprova elegibilidade.</p><div class="profile-summary" id="profileSummary"></div><button id="clearProfile" class="ghost">Apagar perfil local</button></section></section>
-<section class="card features"><div><span>01</span><b>Leitura geral</b><p>Dados que servem para todo candidato.</p></div><div><span>02</span><b>Leitura personalizada</b><p>Perfil, escolaridade, experiência e modalidade.</p></div><div><span>03</span><b>Checklist</b><p>Próximos passos objetivos.</p></div><div><span>04</span><b>Privacidade</b><p>Análise local no navegador.</p></div></section></main><footer>Cidadão Claro 2.0 · open-source · análise informativa · confirme sempre no documento oficial.</footer><script src="app.js" defer></script></body></html>
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Cidadão Claro — IA local para interpretar editais, cruzar seu perfil, organizar prazos e explicar cotas e documentos.">
+  <meta name="theme-color" content="#0c6b57">
+  <title>Cidadão Claro — Radar de concursos</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <a class="skip-link" href="#main">Pular para o conteúdo</a>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <a class="brand" href="#top" aria-label="Cidadão Claro — início">Cidadão <span>Claro</span></a>
+      <nav class="main-nav" aria-label="Navegação principal">
+        <button class="nav-btn" data-tab="services">Serviços públicos</button>
+        <button class="nav-btn active" data-tab="contests">Radar de concursos</button>
+        <button class="nav-btn" data-tab="profile">Meu perfil</button>
+      </nav>
+    </div>
+  </header>
+
+  <main class="shell" id="main">
+    <section class="hero" id="top">
+      <div class="hero-copy">
+        <span class="eyebrow">ACESSO À INFORMAÇÃO</span>
+        <h1>Entenda o edital. Veja onde você se encaixa.</h1>
+        <p class="lead">O Cidadão Claro lê o edital, identifica cargos e áreas correlatas, organiza o cronograma e separa o que importa para o seu perfil — inclusive regras de cotas.</p>
+        <div class="trust-row" aria-label="Características do produto">
+          <span>IA no navegador</span><span>Sem cadastro</span><span>Open-source</span><span>Dados locais</span>
+        </div>
+      </div>
+      <div class="hero-side">
+        <div class="hero-card">
+          <span class="hero-card-kicker">COMO FUNCIONA</span>
+          <b>Perfil → edital → cruzamento inteligente</b>
+          <p>A IA local interpreta sua profissão, encontra áreas correlatas e cruza esses conceitos com os cargos e atribuições do edital — sem API paga.</p>
+        </div>
+      </div>
+    </section>
+
+    <section id="servicesTab" class="tab-panel">
+      <div class="card input-card">
+        <div class="card-head">
+          <div>
+            <span class="eyebrow">MODO 01</span>
+            <h2>Entenda um serviço público</h2>
+            <p>Cole um comunicado, orientação ou texto institucional.</p>
+          </div>
+          <label class="file-label">Carregar .txt/.md/.pdf<input id="serviceFile" type="file" accept=".txt,.md,.pdf,text/plain,text/markdown,application/pdf" hidden></label>
+        </div>
+        <textarea id="serviceText" maxlength="30000" placeholder="Cole aqui o texto oficial…" aria-label="Texto do serviço público"></textarea>
+        <div class="input-foot"><span id="serviceCount">0 / 30.000</span><button id="serviceAnalyze" class="primary">Analisar</button></div>
+        <p id="serviceStatus" class="status" role="status" aria-live="polite"></p>
+      </div>
+      <section id="serviceResult" class="result-wrap hidden"></section>
+    </section>
+
+    <section id="contestsTab" class="tab-panel active">
+      <div class="workspace-grid">
+        <aside class="card profile-panel">
+          <div class="panel-topline"><span class="step">01</span><span class="eyebrow">SEU PERFIL</span></div>
+          <h2>Quem está analisando?</h2>
+          <p class="helper">Quanto mais contexto você der, melhor a leitura personalizada.</p>
+          <div class="form-grid">
+            <label>Área / profissão
+              <input id="profileArea" autocomplete="off" placeholder="Ex.: Designer de produto">
+              <span id="areaHint" class="field-hint">A IA vai sugerir cargos e áreas correlatas.</span>
+            </label>
+            <label>O que você faz no dia a dia? <span class="optional">opcional</span>
+              <textarea id="profileDetails" rows="3" placeholder="Ex.: pesquisa com usuários, prototipação, Figma, discovery, produto digital"></textarea>
+            </label>
+            <div id="areaMap" class="area-map hidden"></div>
+            <label>Escolaridade
+              <select id="profileEducation">
+                <option value="">Selecionar</option><option>Ensino fundamental</option><option>Ensino médio</option><option>Ensino técnico</option><option>Ensino superior</option><option>Pós-graduação</option><option>Mestrado</option><option>Doutorado</option>
+              </select>
+            </label>
+            <div class="inline-grid">
+              <label>Anos de experiência
+                <input id="profileExperience" type="number" min="0" max="60" placeholder="Ex.: 4">
+              </label>
+              <label>UF / região
+                <input id="profileState" placeholder="Ex.: RJ">
+              </label>
+            </div>
+            <label>Modalidade / cota
+              <select id="profileModality">
+                <option value="">Ampla concorrência</option><option value="PPP">PPP — pessoas pretas ou pardas</option><option value="PCD">PCD — pessoa com deficiência</option><option value="INDÍGENAS">Indígenas</option><option value="QUILOMBOLAS">Quilombolas</option>
+              </select>
+            </label>
+          </div>
+          <button id="saveProfile" class="secondary full">Salvar perfil neste navegador</button>
+          <p class="privacy-note">Seu perfil permanece neste navegador. Nada é enviado ao servidor neste modo.</p>
+        </aside>
+
+        <section class="card edital-panel">
+          <div class="panel-topline"><span class="step">02</span><span class="eyebrow">EDITAL</span></div>
+          <div class="edital-head">
+            <div>
+              <h2>Carregue o edital</h2>
+              <p class="helper">PDF, TXT ou Markdown. A leitura acontece no navegador.</p>
+            </div>
+            <label class="file-label primary-file">Selecionar arquivo<input id="contestFile" type="file" accept=".txt,.md,.pdf,text/plain,text/markdown,application/pdf" hidden></label>
+          </div>
+          <div id="fileStatus" class="file-status" aria-live="polite">
+            <span class="file-status-icon">↑</span><span><b>Nenhum edital carregado</b><small>Você também pode colar o texto manualmente abaixo.</small></span>
+          </div>
+          <textarea id="contestText" maxlength="80000" placeholder="Cole o texto do edital aqui…" aria-label="Texto do edital"></textarea>
+          <div class="input-foot"><span id="contestCount">0 / 80.000</span><button id="contestAnalyze" class="primary big-cta">Encontrar o que importa <span>→</span></button></div>
+          <div class="analysis-mode"><span class="mode-dot"></span><span><b>IA local pronta</b> interpreta sua área, cargos correlatos e regras específicas do edital sem chave de API.</span><button id="forceLocalAI" class="text-btn" type="button">Como funciona?</button></div>
+          <p id="contestStatus" class="status" role="status" aria-live="polite"></p>
+        </section>
+      </div>
+      <section id="contestResult" class="result-wrap hidden"></section>
+    </section>
+
+    <section id="profileTab" class="tab-panel">
+      <section class="card profile-page">
+        <span class="eyebrow">SEU PERFIL</span>
+        <h2>Meu perfil</h2>
+        <p>Use o perfil para personalizar a leitura de editais. Ele não é inscrição, comprovação de elegibilidade nem documento oficial.</p>
+        <div class="profile-summary" id="profileSummary"></div>
+        <div id="profileAIMap" class="profile-ai-map"></div>
+        <button id="clearProfile" class="ghost">Apagar perfil local</button>
+      </section>
+    </section>
+
+    <section class="how-it-works card">
+      <div><span class="number">01</span><b>Entenda o edital</b><p>Resumo, vagas, remuneração, taxa, etapas e requisitos.</p></div>
+      <div><span class="number">02</span><b>Veja seu encaixe</b><p>A IA compara sua área com cargos e termos correlatos.</p></div>
+      <div><span class="number">03</span><b>Não perca prazos</b><p>Datas organizadas em linha do tempo e status.</p></div>
+      <div><span class="number">04</span><b>Prepare a cota</b><p>Regras e documentos ficam separados da documentação geral.</p></div>
+    </section>
+  </main>
+
+  <footer>Cidadão Claro · análise informativa · confirme sempre no edital e nos atos oficiais.</footer>
+  <script type="module" src="app.js"></script>
+</body>
+</html>
