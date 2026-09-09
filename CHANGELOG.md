@@ -14,11 +14,13 @@ The format is inspired by Keep a Changelog. The project currently follows pragma
 - GitHub Actions CI for syntax checks and automated tests;
 - broader analyzer regression coverage;
 - Node.js runtime requirement in `package.json`;
-- unified `npm run ci` command.
+- unified `npm run ci` command;
+- regression coverage that prevents the PDF reader from returning to the incompatible PDF.js 6.3.289 browser build.
 
 ### Changed
 
-- README rewritten to document product principles, limitations, architecture and technical roadmap.
+- README rewritten to document product principles, limitations, architecture and technical roadmap;
+- PDF parsing now pins the PDF.js 4.10.38 legacy browser build for compatibility with managed/older Chromium environments that do not implement `Uint8Array.prototype.toHex`.
 
 ## [3.0.0]
 
