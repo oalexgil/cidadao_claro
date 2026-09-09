@@ -37,7 +37,7 @@ export function extractFee(text) {
 export function extractVacancies(text) {
   const source = clean(text);
   const records = [];
-  const re = /(\d{1,3}(?:\.\d{3})*)\s*(?:\([^)]*\)\s*)?vagas?\s+para\s+(?:a\s+)?fun[cç][aã]o\s+de\s+([^.;]{3,110})/gi;
+  const re = /(\d{1,3}(?:\.\d{3})*)\s*(?:\([^)]*\)\s*)?vagas?\s+para\s+(?:a\s+)?fun[cç][aã]o\s+de\s+(.{3,110}?)(?=\s+e\s+\d{1,3}(?:\.\d{3})*\s*(?:\([^)]*\)\s*)?vagas?\b|[.;])/gi;
   for (const match of source.matchAll(re)) {
     records.push({ count: match[1], role: clean(match[2]).replace(/\s+(?:conforme|segundo|distribu[ií]das?).*$/i, '') });
   }
@@ -131,36 +131,43 @@ export function extractDocuments(text, modality = '') {
 
 function proofSection(text) {
   const source = String(text || '');
-  return lastSection(source, /(?:10\.|DA\s+)PROVA\s+OBJETIVA/gi, /(?:\n|\s)11\.\s+/g) || source;
+  return lastSection(source, /(?:10\.\s*(?:DA\s+)?|DA\s+)PROVA\s+OBJETIVA/gi, /(?:\n|\s)11\.\s+/g) || source;
 }
 
 export function extractExam(text, roleHint = '') {
+  const source = clean(text);
   const section = clean(proofSection(text));
   const value = norm(section);
   const items = [];
-  if (/prova objetiva/.test(value)) items.push('Prova objetiva');
+  if (/prova objetiva/.test(value) || /prova objetiva/.test(norm(source))) items.push('Prova objetiva');
   if (/eliminatorio e classificatorio|eliminatoria e classificatoria/.test(value)) items.push('Caráter eliminatório e classificatório');
   if (/periodo da manha.*agente censitario/s.test(value)) items.push('Agente Censitário: prova pela manhã');
   if (/periodo da tarde.*analista censitario/s.test(value)) items.push('Analista Censitário: prova à tarde');
 
-  const subjects = [];
-  const subjectRe = /(Língua Portuguesa|Raciocínio Lógico Quantitativo|Raciocínio Lógico|Geografia|Conhecimentos Técnicos|Conhecimentos Específicos|Informática|Atualidades|Legislação)\s+(\d{1,3})\b/gi;
-  for (const match of section.matchAll(subjectRe)) subjects.push(`${clean(match[1])}: ${match[2]} questões`);
+  const subjectRe = /(Língua Portuguesa|Raciocínio Lógico Quantitativo|Raciocínio Lógico|Geografia|Conhecimentos Técnicos|Conhecimentos Específicos|Informática|Atualidades|Legislação)\s*[:\-]?\s*(\d{1,3})\b/gi;
+  const collectSubjects = (candidateSource) => {
+    const found = [];
+    for (const match of candidateSource.matchAll(subjectRe)) found.push(`${clean(match[1])}: ${match[2]} questões`);
+    return found;
+  };
+  let subjects = collectSubjects(section);
+  if (!subjects.length) subjects = collectSubjects(source);
 
   const role = norm(roleHint);
   let filtered = uniq(subjects);
-  if (role.includes('analista') && /conhecimentos especificos/.test(value)) {
+  if (role.includes('analista') && /conhecimentos especificos/.test(norm(source))) {
     filtered = filtered.filter((item) => !/Geografia|Conhecimentos Técnicos/i.test(item));
-  } else if (role.includes('agente') && /conhecimentos tecnicos/.test(value)) {
+  } else if (role.includes('agente') && /conhecimentos tecnicos/.test(norm(source))) {
     filtered = filtered.filter((item) => !/Conhecimentos Específicos/i.test(item));
   }
   items.push(...filtered.slice(0, 6));
 
+  const approvalSource = section.length >= 200 ? section : source;
   if (role.includes('agente')) {
-    const pass = section.match(/Agente Censit[aá]rio[\s\S]{0,700}?m[ií]nimo,?\s*(\d{1,3})%[\s\S]{0,250}?m[ií]nimo,?\s*1\s*\(uma\)\s*quest[aã]o de cada disciplina/i);
+    const pass = approvalSource.match(/Agente Censit[aá]rio[\s\S]{0,1000}?m[ií]nimo,?\s*(\d{1,3})%[\s\S]{0,350}?m[ií]nimo,?\s*1\s*\(uma\)\s*quest[aã]o de cada disciplina/i);
     if (pass) items.push(`Aprovação: mínimo de ${pass[1]}% do total e 1 questão em cada disciplina`);
   } else if (role.includes('analista')) {
-    const pass = section.match(/Analista Censit[aá]rio[\s\S]{0,700}?m[ií]nimo,?\s*(\d{1,3})%[\s\S]{0,250}?m[ií]nimo,?\s*1\s*\(uma\)\s*quest[aã]o de cada disciplina/i);
+    const pass = approvalSource.match(/Analista Censit[aá]rio[\s\S]{0,1000}?m[ií]nimo,?\s*(\d{1,3})%[\s\S]{0,350}?m[ií]nimo,?\s*1\s*\(uma\)\s*quest[aã]o de cada disciplina/i);
     if (pass) items.push(`Aprovação: mínimo de ${pass[1]}% do total e 1 questão em cada disciplina`);
   }
   return uniq(items).slice(0, 10);
