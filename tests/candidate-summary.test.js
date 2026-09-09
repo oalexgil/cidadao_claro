@@ -6,10 +6,10 @@ import {
   extractProgramContent,
   extractVacancies,
   extractSalaries,
-  extractExam,
   extractFees,
   extractStages,
 } from '../docs/candidate-summary.js';
+import { extractExamSummary } from '../docs/exam-summary.js';
 
 const EDITAL = `
 Lei nº 8.745, de 09/12/1993. Decreto de 16/08/2001.
@@ -74,20 +74,20 @@ test('programmatic content only appears when a role selected by AI is supplied',
 });
 
 test('exam is reduced to the selected role facts', () => {
-  const exam = extractExam(EDITAL, 'Designer Analista Censitário');
+  const exam = extractExamSummary(EDITAL, 'Designer Analista Censitário');
   assert.ok(exam.some((item) => /Prova objetiva/i.test(item)));
-  assert.ok(exam.some((item) => /Analista Censitário.*Língua Portuguesa: 15/i.test(item)));
-  assert.ok(exam.some((item) => /Conhecimentos Específicos: 35/i.test(item)));
-  assert.ok(exam.every((item) => item.length < 260));
+  assert.ok(exam.some((item) => /Analista Censitário.*Língua Portuguesa: 15 questões/i.test(item)));
+  assert.ok(exam.some((item) => /Conhecimentos Específicos: 35 questões/i.test(item)));
+  assert.ok(exam.every((item) => item.length < 300));
 });
 
 test('without a professional profile the exam shows both available role structures', () => {
-  const exam = extractExam(EDITAL, '');
+  const exam = extractExamSummary(EDITAL, '');
   const joined = exam.join(' ');
   assert.match(joined, /ACQ/);
   assert.match(joined, /Analista/);
-  assert.match(joined, /Conhecimentos Técnicos: 20/);
-  assert.match(joined, /Conhecimentos Específicos: 35/);
+  assert.match(joined, /Conhecimentos Técnicos: 20 questões/);
+  assert.match(joined, /Conhecimentos Específicos: 35 questões/);
 });
 
 test('selection stages do not invent a discursive exam', () => {
