@@ -48,15 +48,18 @@ export function extractVacancies(text) {
 
 export function extractSalaries(text) {
   const source = clean(text);
-  const tableStart = norm(source).search(/remuneracao\s+numero\s+de\s+vagas/);
-  const window = tableStart >= 0 ? source.slice(tableStart, tableStart + 1800) : source;
+  const normalized = norm(source);
+  const tableStart = normalized.search(/remuneracao\s+numero\s+de\s+vagas/);
+  const start = tableStart >= 0 ? tableStart : 0;
+  const tail = source.slice(start, start + 1600);
+  const stop = norm(tail).search(/taxa de inscricao|solicitacao de isencao|requisitos para contratacao/);
+  const window = stop > 0 ? tail.slice(0, stop) : tail;
   return uniq(window.match(new RegExp(MONEY, 'gi')) || []).slice(0, 8);
 }
 
 function eventLabel(context) {
   const value = norm(context);
   const rules = [
-    ['Inscrições', /inscri[cç][aã]o|inscricoes/],
     ['Isenção da taxa', /isen[cç][aã]o/],
     ['Pagamento da taxa', /pagamento.*taxa|taxa.*pagamento/],
     ['Prova objetiva', /prova objetiva|aplica[cç][aã]o.*prova|realiza[cç][aã]o.*prova/],
@@ -67,6 +70,7 @@ function eventLabel(context) {
     ['Heteroidentificação', /heteroidentifica[cç][aã]o/],
     ['Avaliação PcD', /avalia[cç][aã]o.*pcd|caracteriza[cç][aã]o.*deficiencia|pericia/],
     ['Deferimento das inscrições', /deferimento.*inscri[cç][aã]o/],
+    ['Inscrições', /inscri[cç][aã]o|inscricoes/],
   ];
   for (const [label, re] of rules) if (re.test(value)) return label;
   return '';
@@ -167,15 +171,16 @@ export function extractProgramContent(text, roleHint = '') {
   const source = String(text || '');
   const section = lastSection(source, /ANEXO\s+III\s*[–-]?\s*CONTE[ÚU]DOS\s+PROGRAM[AÁ]TICOS/gi, /ANEXO\s+IV/gi);
   if (!section) return [];
+  const cleanSection = clean(section);
   const roleWords = norm(roleHint).split(/[^a-z0-9]+/).filter((word) => word.length >= 5 && !['cargo','funcao','area','conhecimento'].includes(word));
-  const normalizedSection = norm(section);
+  const normalizedSection = norm(cleanSection);
   let index = -1;
   for (const word of roleWords) {
     const candidate = normalizedSection.indexOf(word);
     if (candidate >= 0) { index = candidate; break; }
   }
   if (index < 0) return [];
-  const chunk = clean(section.slice(index, index + 2200));
+  const chunk = cleanSection.slice(index, index + 2200);
   return uniq(chunk.split(/;|\.(?=\s+[A-ZÁÉÍÓÚÇ])/).map(clean).filter((item) => item.length >= 18 && item.length <= 220)).slice(0, 8);
 }
 
