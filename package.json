@@ -4,9 +4,13 @@
   "private": true,
   "type": "module",
   "description": "Cidadão Claro: analisador local de serviços públicos e editais de concursos, com compatibilidade por perfil.",
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "test": "node --test tests/*.test.js",
-    "check": "node --check docs/app.js && node --check server/analyzer.js",
+    "check": "node --check docs/app.js && node --check docs/candidate-summary.js && node --check docs/lean-output.js && node --check server/analyzer.js && node --check server/index.js",
+    "ci": "npm run check && npm test",
     "start": "node server/index.js"
   }
 }
