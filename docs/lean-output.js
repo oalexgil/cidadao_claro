@@ -1,4 +1,5 @@
 import { buildCandidateSummary } from './candidate-summary.js';
+import { extractExamSummary } from './exam-summary.js';
 
 const $ = (id) => document.getElementById(id);
 const MAX_CONTEST_CHARS = 250000;
@@ -9,6 +10,11 @@ const clean = (value) => String(value || '').replace(/\s+/g, ' ').trim();
 const list = (items, empty = 'Não localizado no edital.') => items?.length
   ? `<ul>${items.map((item) => `<li>${esc(item)}</li>`).join('')}</ul>`
   : `<div class="empty-state">${esc(empty)}</div>`;
+
+function summarize(text, { roleHint = '', modality = '' } = {}) {
+  const summary = buildCandidateSummary(text, { roleHint, modality });
+  return { ...summary, exam: extractExamSummary(text, roleHint) };
+}
 
 function shortRole(role) {
   if (/agente censit[aá]rio de qualidade/i.test(role)) return 'ACQ';
@@ -180,7 +186,7 @@ analyzeButton?.addEventListener('click', async (event) => {
   const profileDetails = $('profileDetails')?.value?.trim() || '';
   const modality = $('profileModality')?.value || '';
 
-  const baseSummary = buildCandidateSummary(text, { modality });
+  const baseSummary = summarize(text, { modality });
   if (result) {
     result.innerHTML = renderSummary(baseSummary);
     result.classList.remove('hidden');
@@ -201,7 +207,7 @@ analyzeButton?.addEventListener('click', async (event) => {
   try {
     const aiRole = await chooseRoleWithAI([profileArea, profileDetails].filter(Boolean).join('. '), candidates);
     if (!aiRole) throw new Error('NO_AI_ROLE');
-    const enriched = buildCandidateSummary(text, { roleHint: `${profileArea} ${aiRole}`, modality });
+    const enriched = summarize(text, { roleHint: `${profileArea} ${aiRole}`, modality });
     if (result) result.innerHTML = renderSummary(enriched, { aiRole });
     setStatus(`Resumo concluído. IA local relacionou seu perfil a “${aiRole}”.`);
   } catch (error) {
